@@ -19,7 +19,19 @@ API_KEY = os.getenv("API_KEY")
 async def get_api_key(api_key: str = Depends(api_key_header)):
     """Valida a chave de API informada no header X-API-Key.
 
-    Levanta HTTPException 401 caso a chave esteja ausente ou seja inválida.
+    Utilizada como dependência FastAPI nos endpoints protegidos. A chave
+    esperada é lida da variável de ambiente ``API_KEY`` na inicialização.
+
+    Args:
+        api_key: Valor extraído automaticamente do header ``X-API-Key``
+            pelo ``APIKeyHeader``. Será ``None`` se o header estiver ausente.
+
+    Returns:
+        str: A própria chave de API, caso seja válida.
+
+    Raises:
+        HTTPException 401: Se o header estiver ausente ou o valor não
+            corresponder à chave configurada em ``API_KEY``.
     """
     if api_key is None or api_key != API_KEY:
         raise HTTPException(
@@ -32,19 +44,27 @@ async def get_api_key(api_key: str = Depends(api_key_header)):
 
 # ─── Cliente HTTP reutilizável  ────────────────────────────────────
 async def dummyjson_get(endpoint: str, params: Optional[dict] = None) -> dict:
-    """Realiza uma requisição GET autenticada à API DummyJSON.
+    """Realiza uma requisição GET à API DummyJSON e retorna o corpo como dicionário.
+
+    Função auxiliar compartilhada por todos os endpoints. Cria um
+    ``httpx.AsyncClient`` com timeout de 10 s por requisição.
 
     Args:
-        endpoint: Caminho do recurso, ex: ``/recipes/search``.
-        params: Parâmetros de query string opcionais.
+        endpoint: Caminho do recurso relativo à base ``https://dummyjson.com``,
+            ex: ``/recipes/search`` ou ``/recipes/42``.
+        params: Dicionário de parâmetros de query string a serem anexados à
+            URL. Use ``None`` (padrão) quando não houver parâmetros.
 
     Returns:
-        Corpo da resposta deserializado como dicionário.
+        dict: Corpo da resposta HTTP deserializado como dicionário Python,
+            conforme retornado pelo DummyJSON sem nenhuma transformação.
 
     Raises:
-        HTTPException 4xx/5xx: Repassa o status retornado pelo upstream.
-        HTTPException 502: Falha de conexão ou timeout com o upstream.
-        HTTPException 500: Qualquer outra exceção inesperada.
+        HTTPException: Com o mesmo status HTTP retornado pelo DummyJSON em
+            caso de erro 4xx ou 5xx no upstream.
+        HTTPException 502: Quando ocorre falha de rede, timeout ou qualquer
+            ``httpx.RequestError`` ao tentar alcançar o DummyJSON.
+        HTTPException 500: Para qualquer outra exceção inesperada.
     """
     url = f"https://dummyjson.com{endpoint}"
     timeout = httpx.Timeout(10.0)
@@ -81,8 +101,20 @@ async def search_recipes(
 ):
     """Busca receitas pelo termo informado, com suporte a paginação.
 
-    Repassa a busca ao endpoint ``/recipes/search`` do DummyJSON e retorna
-    o JSON resultante sem transformações.
+    Repassa os parâmetros diretamente ao endpoint ``/recipes/search`` do
+    DummyJSON e devolve o JSON resultante sem transformações.
+
+    Args:
+        q: Termo de busca (mínimo 2 caracteres). Pesquisado pelo DummyJSON
+            nos campos nome e ingredientes das receitas.
+        limit: Quantidade máxima de resultados a retornar por página.
+            Aceita valores de 1 a 50; padrão é 10.
+        skip: Número de registros a pular, usado para paginação. Por exemplo,
+            ``skip=10`` com ``limit=10`` retorna a segunda página.
+
+    Returns:
+        dict: Objeto JSON do DummyJSON contendo as chaves ``recipes``
+            (lista de receitas encontradas), ``total``, ``skip`` e ``limit``.
     """
     data = await dummyjson_get(
         "/recipes/search",
@@ -101,8 +133,20 @@ async def get_recipe_by_id(
 ):
     """Retorna os detalhes completos de uma receita pelo seu ID.
 
-    Repassa a requisição ao endpoint ``/recipes/{id}`` do DummyJSON e retorna
-    o JSON resultante sem transformações. IDs válidos vão de 1 a 50.
+    Repassa a requisição ao endpoint ``/recipes/{id}`` do DummyJSON e devolve
+    o JSON resultante sem transformações.
+
+    Args:
+        recipe_id: Identificador inteiro da receita (mínimo 1). A base
+            DummyJSON contém receitas com IDs de 1 a 50; IDs fora desse
+            intervalo resultarão em 404 retornado pelo upstream.
+
+    Returns:
+        dict: Objeto JSON completo da receita, incluindo campos como
+            ``id``, ``name``, ``ingredients``, ``instructions``,
+            ``prepTimeMinutes``, ``cookTimeMinutes``, ``servings``,
+            ``difficulty``, ``cuisine``, ``caloriesPerServing``, ``tags``,
+            ``rating`` e ``image``.
     """
     data = await dummyjson_get(f"/recipes/{recipe_id}")
     return data
